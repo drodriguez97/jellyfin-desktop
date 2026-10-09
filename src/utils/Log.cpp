@@ -50,7 +50,10 @@ static void qtMessageOutput(QtMsgType type, const QMessageLogContext& context, c
     QString fileMessage = qFormatLogMessage(type, context, msg);
     Log::CensorAuthTokens(fileMessage);
     logFile->write(fileMessage.toUtf8() + '\n');
-    logFile->flush();
+    // Per-line flushing forces a synchronous disk write on the logging thread
+    // (often the GUI thread). Only flush for warnings and above.
+    if (type != QtDebugMsg && type != QtInfoMsg)
+      logFile->flush();
   }
 
   if (type == QtFatalMsg)

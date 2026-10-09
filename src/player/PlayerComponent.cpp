@@ -95,7 +95,9 @@ void PlayerComponent::initializeMpv()
   // Properties that needed to be set before init were set in MpvVideoItem constructor
 
   mpv_request_log_messages(m_mpv->mpv(), "terminal-default");
-  m_mpv->setProperty("msg-level", "all=v");
+  // Verbose mpv logging goes through the Qt log handler on the GUI thread;
+  // default to info to avoid stalls during playback (JF_MPV_VERBOSE=1 for verbose).
+  m_mpv->setProperty("msg-level", qEnvironmentVariableIsSet("JF_MPV_VERBOSE") ? "all=v" : "all=info");
 
   mpv_set_wakeup_callback(m_mpv->mpv(), wakeup_cb, this);
 

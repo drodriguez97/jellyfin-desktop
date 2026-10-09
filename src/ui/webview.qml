@@ -233,7 +233,10 @@ Window
 
     // this is needed to prevent intermittent(?) black screens when unminizing
     // or resumsing from suspend (linux/{x11/wayland}, possibly others).
-    layer.enabled: true
+    // Only needed on Linux: the layer renders the whole web view into an
+    // extra offscreen texture every frame, which is costly on Windows where
+    // the scene graph is already forced onto OpenGL.
+    layer.enabled: Qt.platform.os === 'linux' || Qt.platform.os === 'unix'
 
     webChannel: webChannelObject
     settings.errorPageEnabled: false
