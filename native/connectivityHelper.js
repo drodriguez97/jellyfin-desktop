@@ -1,7 +1,7 @@
 window.jmpCheckServerConnectivity = (() => {
     let activeController = null;
 
-    const checkFunc = async function(url) {
+    const checkFunc = async function(url, onAttemptFailed) {
         // Abort any in-progress check
         if (activeController) {
             activeController.abort();
@@ -23,10 +23,19 @@ window.jmpCheckServerConnectivity = (() => {
 
         return new Promise((resolve, reject) => {
             // Handle abort
+            let failHandler = null;
+            const disconnectFail = () => {
+                if (failHandler && window.api.system.serverConnectivityAttemptFailed) {
+                    window.api.system.serverConnectivityAttemptFailed.disconnect(failHandler);
+                }
+                failHandler = null;
+            };
+
             controller.signal.addEventListener('abort', () => {
                 if (handler) {
                     window.api.system.serverConnectivityResult.disconnect(handler);
                 }
+                disconnectFail();
                 reject(new Error('Connection cancelled'));
             });
 
@@ -34,6 +43,7 @@ window.jmpCheckServerConnectivity = (() => {
                 if (resultUrl === url && !controller.signal.aborted) {
                     window.api.system.serverConnectivityResult.disconnect(handler);
                     handler = null;
+                    disconnectFail();
                     if (activeController === controller) {
                         activeController = null;
                     }
@@ -45,6 +55,14 @@ window.jmpCheckServerConnectivity = (() => {
                 }
             };
 
+            if (onAttemptFailed && window.api.system.serverConnectivityAttemptFailed) {
+                failHandler = (failedUrl, error) => {
+                    if (failedUrl === url && !controller.signal.aborted) {
+                        onAttemptFailed(error);
+                    }
+                };
+                window.api.system.serverConnectivityAttemptFailed.connect(failHandler);
+            }
             window.api.system.serverConnectivityResult.connect(handler);
             window.api.system.checkServerConnectivity(url);
         });

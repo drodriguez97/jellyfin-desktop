@@ -373,6 +373,7 @@ void SystemComponent::checkServerConnectivity(QString url)
       }
 
       bool success = false;
+      QString failureReason;
       if (reply->error() == QNetworkReply::NoError) {
         QByteArray data = reply->readAll();
         QJsonDocument doc = QJsonDocument::fromJson(data);
@@ -380,9 +381,11 @@ void SystemComponent::checkServerConnectivity(QString url)
           success = true;
         } else {
           qWarning() << "checkServerConnectivity: invalid response";
+          failureReason = QStringLiteral("Something answered at this address, but it isn't a Jellyfin server.");
         }
       } else {
         qWarning() << "checkServerConnectivity: error:" << reply->errorString();
+        failureReason = reply->errorString();
       }
 
       if (success) {
@@ -390,6 +393,7 @@ void SystemComponent::checkServerConnectivity(QString url)
         m_pendingConnectivityUrl.clear();
         emit serverConnectivityResult(url, success, fullResolvedUrl);
       } else {
+        emit serverConnectivityAttemptFailed(url, failureReason);
         m_connectivityRetryTimer->start(CONNECTIVITY_RETRY_INTERVAL_MS);
       }
 

@@ -1,12 +1,44 @@
+// Turn what the user typed into a URL. A bare IPv4 address with no port is
+// almost certainly a Jellyfin server on its default port, so add :8096
+// (otherwise it would be tried on port 80 and retried forever).
+function normalizeServerAddress(server) {
+    server = server.trim();
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(server)) {
+        server = server + ":8096";
+    }
+    if (!/^https?:\/\//i.test(server)) {
+        server = "http://" + server;
+    }
+    return server;
+}
+
+function showStatus(text) {
+    const status = document.getElementById('status');
+    status.textContent = text || '';
+    status.style.display = text ? 'block' : 'none';
+}
+
+function describeFailure(server, error) {
+    let msg = "Can't reach " + server + (error ? " (" + error + ")" : "") + ". Retrying every few seconds.";
+    try {
+        const u = new URL(server);
+        if (!u.port && u.protocol === 'http:') {
+            msg += " Jellyfin usually runs on port 8096, so try " + u.hostname + ":8096.";
+        }
+    } catch (e) {}
+    return msg + " Press Esc to cancel and edit the address.";
+}
+
 async function tryConnect(server) {
     try {
-        if (!server.startsWith("http")) {
-            server = "http://" + server;
-        }
+        server = normalizeServerAddress(server);
 
         console.log("Checking connectivity to:", server);
+        showStatus("Connecting to " + server + "\u2026 Press Esc to cancel.");
 
-        const resolvedUrl = await window.jmpCheckServerConnectivity(server);
+        const resolvedUrl = await window.jmpCheckServerConnectivity(server, (error) => {
+            showStatus(describeFailure(server, error));
+        });
         console.log("Server connectivity check passed");
         console.log("Resolved URL:", resolvedUrl);
 
@@ -19,6 +51,7 @@ async function tryConnect(server) {
         return true;
     } catch (e) {
         console.error("Server connectivity check failed:", e);
+        showStatus('');
         return false;
     }
 }
@@ -80,6 +113,7 @@ const cancelConnection = () => {
 
     console.log("Cancelling connection");
     isConnecting = false;
+    showStatus('');
 
     // Cancel C++ connectivity check and abort JS promise
     if (window.api && window.api.system) {

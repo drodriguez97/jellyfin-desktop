@@ -136,3 +136,12 @@ button:disabled {
 #connect-button.cancel:hover:not(:disabled) {
     background: #d93134;
 }
+
+#status {
+    display: none;
+    max-width: 450px;
+    margin: calc(80px + 2.5em) auto 1em;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.95em;
+    line-height: 1.4;
+}

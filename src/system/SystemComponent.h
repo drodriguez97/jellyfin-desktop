@@ -43,6 +43,8 @@ public:
   Q_INVOKABLE void checkServerConnectivity(QString url);
   Q_INVOKABLE void cancelServerConnectivity();
   Q_SIGNAL void serverConnectivityResult(QString url, bool success, QString resolvedUrl);
+  // Emitted after each failed attempt; checks keep retrying until cancelled.
+  Q_SIGNAL void serverConnectivityAttemptFailed(QString url, QString error);
 
   static QString extractBaseUrl(const QString& url);
   void resolveUrl(const QString& url, std::function<void(const QString&)> callback);
