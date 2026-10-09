@@ -1,15 +1,27 @@
-// Turn what the user typed into a URL. A bare IPv4 address with no port is
-// almost certainly a Jellyfin server on its default port, so add :8096
-// (otherwise it would be tried on port 80 and retried forever).
+// Turn what the user typed into a URL when they leave off http:// or https://.
+// - A public domain name (jellyfin.example.com) is almost always behind a
+//   reverse proxy with TLS, so use https.
+// - A bare IP or local name (192.168.1.50, myserver, nas.local) is almost
+//   always Jellyfin itself, so use http on its default port 8096.
+// - Anything with an explicit port is left on http, as before.
 function normalizeServerAddress(server) {
-    server = server.trim();
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(server)) {
-        server = server + ":8096";
+    server = server.trim().replace(/\/+$/, '');
+    if (/^https?:\/\//i.test(server)) {
+        return server;
     }
-    if (!/^https?:\/\//i.test(server)) {
-        server = "http://" + server;
+
+    const host = server.split('/')[0];
+    const hasPort = /:\d+$/.test(host);
+    const isIPv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+    const isLocalName = !host.includes('.') || /\.(local|lan|home|internal|localdomain)$/i.test(host);
+
+    if (hasPort) {
+        return "http://" + server;
     }
-    return server;
+    if (isIPv4 || isLocalName) {
+        return "http://" + host + ":8096" + server.slice(host.length);
+    }
+    return "https://" + server;
 }
 
 function showStatus(text) {
@@ -23,7 +35,9 @@ function describeFailure(server, error) {
     try {
         const u = new URL(server);
         if (!u.port && u.protocol === 'http:') {
-            msg += " Jellyfin usually runs on port 8096, so try " + u.hostname + ":8096.";
+            msg += " Try https://" + u.hostname + " or " + u.hostname + ":8096.";
+        } else if (u.protocol === 'https:' && !u.port) {
+            msg += " If this server doesn't use https, try http://" + u.hostname + ":8096.";
         }
     } catch (e) {}
     return msg + " Press Esc to cancel and edit the address.";

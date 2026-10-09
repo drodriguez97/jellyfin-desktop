@@ -275,13 +275,16 @@ void SystemComponent::setReplyTimeout(QNetworkReply* reply, int ms)
   QPointer<QNetworkReply> replyPtr(reply);
   QTimer::singleShot(ms, this, [replyPtr]() {
     if (replyPtr && !replyPtr->isFinished()) {
+      // abort() reports OperationCanceledError, same as a user cancel; tag it
+      // so finished handlers can tell a timeout apart and keep retrying.
+      replyPtr->setProperty("timedOut", true);
       replyPtr->abort();
     }
   });
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-void SystemComponent::resolveUrl(const QString& url, std::function<void(const QString&)> callback)
+void SystemComponent::resolveUrl(const QString& url, std::function<void(const QString&)> callback, int timeoutMs)
 {
   // Abort any pending resolve
   if (m_resolveUrlReply) {
@@ -298,14 +301,14 @@ void SystemComponent::resolveUrl(const QString& url, std::function<void(const QS
   m_resolveUrlReply = m_networkManager->head(request);
 
   QNetworkReply* reply = m_resolveUrlReply;
-  setReplyTimeout(reply, NETWORK_REQUEST_TIMEOUT_MS);
+  setReplyTimeout(reply, timeoutMs);
 
   if (SettingsComponent::Get().ignoreSSLErrors()) {
     connect(reply, QOverload<const QList<QSslError>&>::of(&QNetworkReply::sslErrors),
             reply, QOverload<>::of(&QNetworkReply::ignoreSslErrors));
   }
   connect(reply, &QNetworkReply::finished, this, [this, reply, callback]() {
-    if (reply->error() == QNetworkReply::OperationCanceledError) {
+    if (reply->error() == QNetworkReply::OperationCanceledError && !reply->property("timedOut").toBool()) {
       reply->deleteLater();
       if (m_resolveUrlReply == reply) {
         m_resolveUrlReply = nullptr;
@@ -356,7 +359,7 @@ void SystemComponent::checkServerConnectivity(QString url)
     m_connectivityCheckReply = m_networkManager->get(request);
 
     QNetworkReply* reply = m_connectivityCheckReply;
-    setReplyTimeout(reply, NETWORK_REQUEST_TIMEOUT_MS);
+    setReplyTimeout(reply, CONNECTIVITY_TIMEOUT_MS);
 
     if (SettingsComponent::Get().ignoreSSLErrors()) {
       connect(reply, QOverload<const QList<QSslError>&>::of(&QNetworkReply::sslErrors),
@@ -364,7 +367,8 @@ void SystemComponent::checkServerConnectivity(QString url)
     }
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, url, fullResolvedUrl]() {
-      if (reply->error() == QNetworkReply::OperationCanceledError) {
+      const bool timedOut = reply->property("timedOut").toBool();
+      if (reply->error() == QNetworkReply::OperationCanceledError && !timedOut) {
         reply->deleteLater();
         if (m_connectivityCheckReply == reply) {
           m_connectivityCheckReply = nullptr;
@@ -383,6 +387,9 @@ void SystemComponent::checkServerConnectivity(QString url)
           qWarning() << "checkServerConnectivity: invalid response";
           failureReason = QStringLiteral("Something answered at this address, but it isn't a Jellyfin server.");
         }
+      } else if (timedOut) {
+        qWarning() << "checkServerConnectivity: timed out";
+        failureReason = QStringLiteral("no response from the server");
       } else {
         qWarning() << "checkServerConnectivity: error:" << reply->errorString();
         failureReason = reply->errorString();
@@ -402,7 +409,7 @@ void SystemComponent::checkServerConnectivity(QString url)
         m_connectivityCheckReply = nullptr;
       }
     });
-  });
+  }, CONNECTIVITY_TIMEOUT_MS);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

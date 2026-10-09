@@ -16,6 +16,9 @@
 // Network timeouts (milliseconds)
 constexpr int NETWORK_REQUEST_TIMEOUT_MS = 30000;
 constexpr int CONNECTIVITY_RETRY_INTERVAL_MS = 5000;
+// Per-attempt timeout for the connect screen, so an unresponsive address
+// reports back quickly instead of after the generic 30s.
+constexpr int CONNECTIVITY_TIMEOUT_MS = 10000;
 
 class SystemComponent : public ComponentBase
 {
@@ -47,7 +50,8 @@ public:
   Q_SIGNAL void serverConnectivityAttemptFailed(QString url, QString error);
 
   static QString extractBaseUrl(const QString& url);
-  void resolveUrl(const QString& url, std::function<void(const QString&)> callback);
+  void resolveUrl(const QString& url, std::function<void(const QString&)> callback,
+                  int timeoutMs = NETWORK_REQUEST_TIMEOUT_MS);
 
   Q_INVOKABLE QString getUserAgent();
 
