@@ -451,22 +451,48 @@ impl Player {
         let cache_on_disk = s.bool(settings::SECTION_VIDEO, "cache_on_disk");
         let cache_dir = s.conf_path().parent().map(|p| p.join("mpv-cache"));
         drop(s);
-        if cache_on_disk {
-            if let Some(dir) = cache_dir {
-                let _ = std::fs::create_dir_all(&dir);
+        // Disk-backed cache: keep (almost) the whole file ahead and a long tail
+        // behind so skips in both directions stay local. The budget is capped by
+        // the free space on the drive, with a reserve left untouched; when there
+        // is not enough room for a useful cache, fall back to the memory cache.
+        const GIB: i64 = 1024 * 1024 * 1024;
+        const DISK_CACHE_MAX: i64 = 8 * GIB;
+        const DISK_RESERVE: i64 = 4 * GIB;
+        const DISK_CACHE_MIN: i64 = GIB;
+        let disk_budget = if cache_on_disk {
+            cache_dir.as_ref().and_then(|dir| {
+                std::fs::create_dir_all(dir).ok()?;
+                let free = free_disk_space(dir)?;
+                let budget = (free - DISK_RESERVE).min(DISK_CACHE_MAX);
+                if budget >= DISK_CACHE_MIN {
+                    Some((dir.clone(), budget))
+                } else {
+                    warn!(
+                        "disk cache disabled: only {} MB free on {}",
+                        free / (1024 * 1024),
+                        dir.display()
+                    );
+                    None
+                }
+            })
+        } else {
+            None
+        };
+        match disk_budget {
+            Some((dir, budget)) => {
                 if let Some(d) = dir.to_str() {
                     self.set("cache-dir", d);
                 }
+                self.set("cache-on-disk", "yes");
+                self.set("demuxer-max-bytes", budget);
+                self.set("demuxer-max-back-bytes", budget / 4);
+                info!("disk cache enabled, budget {} MB", budget / (1024 * 1024));
             }
-            self.set("cache-on-disk", "yes");
-            // Disk-backed: cache (almost) the whole file ahead and keep a long tail
-            // behind so backwards skips stay local too.
-            self.set("demuxer-max-bytes", 8_i64 * 1024 * 1024 * 1024);
-            self.set("demuxer-max-back-bytes", 2_i64 * 1024 * 1024 * 1024);
-        } else {
-            self.set("cache-on-disk", "no");
-            self.set("demuxer-max-bytes", cache_mb.max(10) * 1024 * 1024);
-            self.set("demuxer-max-back-bytes", (cache_mb.max(10) / 2) * 1024 * 1024);
+            None => {
+                self.set("cache-on-disk", "no");
+                self.set("demuxer-max-bytes", cache_mb.max(10) * 1024 * 1024);
+                self.set("demuxer-max-back-bytes", (cache_mb.max(10) / 2) * 1024 * 1024);
+            }
         }
 
         let display_fps = crate::display::current_refresh_rate(self.window_hwnd());
@@ -743,4 +769,25 @@ fn base_url_of(url: &str) -> String {
     };
     let host = rest.split(['/', '?', '#']).next().unwrap_or("");
     format!("{scheme}://{host}")
+}
+
+/// Free bytes available to the current user on the volume holding `path`.
+fn free_disk_space(path: &std::path::Path) -> Option<i64> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut free_to_caller: u64 = 0;
+    let ok = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_to_caller,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        warn!("GetDiskFreeSpaceExW failed for {}", path.display());
+        return None;
+    }
+    Some(free_to_caller.min(i64::MAX as u64) as i64)
 }

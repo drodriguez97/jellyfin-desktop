@@ -432,8 +432,8 @@
       {
         "value": "cache_on_disk",
         "display_name": "Cache to Disk",
-        "help": "Keeps downloading the current file ahead of playback into a temporary file (up to 8 GB) instead of a small memory cache, so after the first minutes most of a movie is local and every skip is instant. Uses disk space while playing; the file is removed when playback ends. Takes effect on the next item.",
-        "default": false
+        "help": "Keeps downloading the current file ahead of playback into a temporary file (up to 8 GB) instead of a small memory cache, so after the first minutes most of a movie is local and every skip is instant. Uses disk space while playing; the file is removed when playback ends. Falls back to the memory cache automatically when the drive is low on space. Takes effect on the next item.",
+        "default": true
       },
       {
         "value": "aspect",
