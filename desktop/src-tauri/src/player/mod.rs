@@ -46,11 +46,13 @@ pub struct Player {
     pub stream_switch_imminent: AtomicBool,
     pub audio_delay_ms: AtomicI64,
     pub audio_reload_pending: AtomicBool,
+    /// Top-level window handle (for display lookups).
+    pub window_hwnd: std::sync::atomic::AtomicIsize,
 }
 
 impl Player {
     /// Creates the mpv instance rendering into `wid` and applies the user's settings.
-    pub fn new(app: AppHandle, settings: Arc<Mutex<Settings>>, wid: HWND) -> Result<Arc<Self>> {
+    pub fn new(app: AppHandle, settings: Arc<Mutex<Settings>>, wid: HWND, window: HWND) -> Result<Arc<Self>> {
         let verbose = std::env::var_os("JF_MPV_VERBOSE").is_some();
         let mpv_conf = {
             let s = settings.lock();
@@ -111,6 +113,7 @@ impl Player {
             stream_switch_imminent: AtomicBool::new(false),
             audio_delay_ms: AtomicI64::new(0),
             audio_reload_pending: AtomicBool::new(false),
+            window_hwnd: std::sync::atomic::AtomicIsize::new(window as isize),
         });
 
         events::start(player.clone())?;
@@ -448,6 +451,11 @@ impl Player {
         self.set("demuxer-max-bytes", cache_mb * 1024 * 1024);
         drop(s);
 
+        let display_fps = crate::display::current_refresh_rate(self.window_hwnd());
+        if display_fps > 0.0 {
+            self.set("display-fps-override", display_fps);
+        }
+
         self.set_audio_delay(self.audio_delay_ms.load(Ordering::Relaxed));
         self.update_video_aspect_settings();
     }
@@ -545,8 +553,48 @@ impl Player {
 
     pub fn set_audio_delay(&self, ms: i64) {
         self.audio_delay_ms.store(ms, Ordering::Relaxed);
-        let fixed = self.settings.lock().f64(settings::SECTION_VIDEO, "audio_delay.normal");
+        let display_fps = crate::display::current_refresh_rate(self.window_hwnd());
+        let key = if (display_fps - 24.0).abs() < 0.5 {
+            "audio_delay.24hz"
+        } else if (display_fps - 25.0).abs() < 0.5 {
+            "audio_delay.25hz"
+        } else if (display_fps - 50.0).abs() < 0.5 {
+            "audio_delay.50hz"
+        } else {
+            "audio_delay.normal"
+        };
+        let fixed = self.settings.lock().f64(settings::SECTION_VIDEO, key);
         self.set("audio-delay", (fixed + ms as f64) / 1000.0);
+    }
+
+    fn window_hwnd(&self) -> HWND {
+        self.window_hwnd.load(Ordering::Relaxed) as HWND
+    }
+
+    /// Port of `PlayerComponent::switchDisplayFrameRate`.
+    pub fn switch_display_frame_rate(&self) -> bool {
+        let (auto_switch, avoid, fullscreen) = {
+            let s = self.settings.lock();
+            (
+                s.bool(settings::SECTION_VIDEO, "refreshrate.auto_switch"),
+                s.bool(settings::SECTION_VIDEO, "refreshrate.avoid_25hz_30hz"),
+                s.bool(settings::SECTION_MAIN, "fullscreen"),
+            )
+        };
+        let fps = self.playback.lock().media_frame_rate;
+        debug!("Video framerate: {fps} fps");
+        if !auto_switch {
+            return false;
+        }
+        if !fullscreen && !crate::window::is_fullscreen(&self.app) {
+            debug!("Not switching refresh-rate (not in fullscreen mode).");
+            return false;
+        }
+        if fps < 1.0 {
+            debug!("Not switching refresh-rate (no known video framerate).");
+            return false;
+        }
+        crate::display::switch_to_best_mode(self.window_hwnd(), fps as f32, avoid)
     }
 
     // ---- audio devices -----------------------------------------------------

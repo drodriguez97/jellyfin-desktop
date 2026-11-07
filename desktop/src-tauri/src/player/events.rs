@@ -196,9 +196,22 @@ fn event_loop(player: Arc<Player>) {
                     }
                     _ => {}
                 }
-                player
+                let switching = player
                     .stream_switch_imminent
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
+                    .swap(false, std::sync::atomic::Ordering::Relaxed);
+                if !switching {
+                    // Restore the display mode unless another file is about to play.
+                    let app = player.app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        if let Some(p) = crate::player::commands::player_from(&app) {
+                            if p.get_bool("idle-active") {
+                                crate::display::restore_previous_mode();
+                                p.update_video_configuration();
+                            }
+                        }
+                    });
+                }
             }
             Event::PropertyChange { change, reply_userdata, .. } => {
                 state_dirty = handle_property(&player, &mut tracker, reply_userdata, change);
@@ -234,7 +247,18 @@ fn event_loop(player: Arc<Player>) {
 fn handle_hook(player: &Player, id: u64) {
     match id {
         HOOK_ON_LOAD => {
-            // Display refresh-rate switching would go here (not implemented yet).
+            // Switch the display to the media's frame rate before loading, then
+            // give the monitor time to settle (mode changes can break hwdec init).
+            if player.switch_display_frame_rate() {
+                let delay = player
+                    .settings
+                    .lock()
+                    .i64(crate::settings::SECTION_VIDEO, "refreshrate.delay")
+                    .max(0) as u64;
+                info!("waiting {delay}s after rate switch before loading");
+                std::thread::sleep(std::time::Duration::from_secs(delay));
+                player.update_video_configuration();
+            }
         }
         HOOK_ON_PRELOADED => {
             let (sub, audio) = {

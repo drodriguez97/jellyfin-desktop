@@ -1,6 +1,7 @@
 //! Jellyfin Desktop shell: WebView2 (jellyfin-web) over libmpv (D3D11).
 
 mod artwork;
+mod display;
 mod input;
 mod logging;
 mod media_keys;
@@ -202,7 +203,7 @@ fn setup(app: &mut tauri::App, boot: &Boot) -> Result<()> {
     // Video host child + mpv.
     let parent = hwnd_of(&window)?;
     let video = video_host::create(parent)?;
-    let player = player::Player::new(handle.clone(), boot.settings.clone(), video)?;
+    let player = player::Player::new(handle.clone(), boot.settings.clone(), video, parent)?;
     *app.state::<player::commands::PlayerState>().write() = Some(player);
     info!("mpv initialized (video host {:?}) at {:?}", video, t0.elapsed());
 
@@ -393,6 +394,7 @@ pub fn run() {
     app.run(|app, event| {
         if let RunEvent::ExitRequested { .. } = event {
             window::flush_geometry(app);
+            display::restore_previous_mode();
             if let Some(p) = player::commands::player_from(app) {
                 p.stop();
             }
