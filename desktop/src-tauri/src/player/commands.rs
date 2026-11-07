@@ -176,6 +176,12 @@ pub fn player_set_audio_device(state: State<'_, PlayerState>, name: String) -> R
     Ok(())
 }
 
+/// Debug helper: read any mpv property as a string (JSON for node properties).
+#[tauri::command]
+pub fn player_get_property(state: State<'_, PlayerState>, name: String) -> Result<Option<String>, String> {
+    Ok(get(&state)?.get_string(&name))
+}
+
 #[tauri::command]
 pub fn player_user_command(state: State<'_, PlayerState>, command: String) -> Result<(), String> {
     get(&state)?.user_command(&command);

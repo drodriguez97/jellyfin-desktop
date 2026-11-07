@@ -61,6 +61,7 @@ struct Tracker {
     video_playback_active: bool,
     last_position: f64,
     last_position_emit: std::time::Instant,
+    buffering_since: std::time::Instant,
 }
 
 impl Tracker {
@@ -78,6 +79,7 @@ impl Tracker {
             video_playback_active: false,
             last_position: 0.0,
             last_position_emit: std::time::Instant::now(),
+            buffering_since: std::time::Instant::now(),
         }
     }
 
@@ -105,8 +107,21 @@ impl Tracker {
             info!("Entering state: {}", new_state.name());
             match new_state {
                 State::Paused => emit(player, "paused", ()),
-                State::Playing => emit(player, "playing", ()),
-                State::Buffering => self.last_buffering_percentage = -1,
+                State::Playing => {
+                    if self.state == State::Buffering {
+                        info!(
+                            "stall ended after {:?} ({})",
+                            self.buffering_since.elapsed(),
+                            player.stall_diagnostics()
+                        );
+                    }
+                    emit(player, "playing", ())
+                }
+                State::Buffering => {
+                    self.last_buffering_percentage = -1;
+                    self.buffering_since = std::time::Instant::now();
+                    info!("stall: {}", player.stall_diagnostics());
+                }
                 State::Finished => {
                     emit(player, "finished", ());
                     emit(player, "stopped", ());

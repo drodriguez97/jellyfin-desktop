@@ -90,6 +90,7 @@
             getAudioDeviceList: ['player_get_audio_device_list', []],
             setAudioDevice: ['player_set_audio_device', ['name']],
             userCommand: ['player_user_command', ['command']],
+            getProperty: ['player_get_property', ['name']],
             setWebPlaylist: ['player_set_web_playlist', ['playlist', 'currentItemId']],
             getWebPlaylist: ['player_get_web_playlist', []],
             getCurrentWebPlaylistItemId: ['player_get_current_web_playlist_item_id', []],

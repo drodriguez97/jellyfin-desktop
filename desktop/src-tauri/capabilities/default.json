@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Commands available to the bundled pages (connect screen).",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "opener:default",
@@ -30,6 +32,7 @@
     "allow-player-get-audio-device-list",
     "allow-player-set-audio-device",
     "allow-player-user-command",
+    "allow-player-get-property",
     "allow-player-set-web-playlist",
     "allow-player-get-web-playlist",
     "allow-player-get-current-web-playlist-item-id",

@@ -29,6 +29,7 @@ pub const COMMANDS: &[&str] = &[
     "player_get_audio_device_list",
     "player_set_audio_device",
     "player_user_command",
+    "player_get_property",
     "player_set_web_playlist",
     "player_get_web_playlist",
     "player_get_current_web_playlist_item_id",

@@ -358,6 +358,7 @@ pub fn run() {
             player::commands::player_get_audio_device_list,
             player::commands::player_set_audio_device,
             player::commands::player_user_command,
+            player::commands::player_get_property,
             player::commands::player_set_web_playlist,
             player::commands::player_get_web_playlist,
             player::commands::player_get_current_web_playlist_item_id,

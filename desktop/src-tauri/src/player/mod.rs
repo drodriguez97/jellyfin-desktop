@@ -666,6 +666,24 @@ impl Player {
 
     // ---- debug info --------------------------------------------------------
 
+    /// One-line snapshot of why playback may be stalling.
+    pub fn stall_diagnostics(&self) -> String {
+        let p = |name: &str| self.get_string(name).unwrap_or_else(|| "-".into());
+        format!(
+            "seeking={} paused-for-cache={} cache-speed={}B/s cache-duration={}s buffering={}% hwdec={} vo-dropped={} decoder-dropped={} fps={} pos={}",
+            p("seeking"),
+            p("paused-for-cache"),
+            p("cache-speed"),
+            p("demuxer-cache-duration"),
+            p("cache-buffering-state"),
+            p("hwdec-current"),
+            p("frame-drop-count"),
+            p("decoder-frame-drop-count"),
+            p("estimated-vf-fps"),
+            p("playback-time"),
+        )
+    }
+
     pub fn video_information(&self) -> String {
         if self.get_bool("idle-active") {
             return String::new();

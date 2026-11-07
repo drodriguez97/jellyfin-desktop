@@ -2,9 +2,16 @@
   "$schema": "../gen/schemas/remote-schema.json",
   "identifier": "remote-jellyfin-web",
   "description": "Commands available to jellyfin-web served from the user's server (any origin).",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "remote": {
-    "urls": ["http://*:*/*", "https://*:*/*", "http://*/*", "https://*/*"]
+    "urls": [
+      "http://*:*/*",
+      "https://*:*/*",
+      "http://*/*",
+      "https://*/*"
+    ]
   },
   "permissions": [
     "allow-player-load",
@@ -31,6 +38,7 @@
     "allow-player-get-audio-device-list",
     "allow-player-set-audio-device",
     "allow-player-user-command",
+    "allow-player-get-property",
     "allow-player-set-web-playlist",
     "allow-player-get-web-playlist",
     "allow-player-get-current-web-playlist-item-id",
