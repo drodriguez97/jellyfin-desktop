@@ -8,6 +8,7 @@ use serde_json::json;
 
 const API_JS: &str = include_str!("../../web/bridge/api.js");
 const HOST_KEYS_JS: &str = include_str!("../../web/bridge/hostKeys.js");
+const THEME_JS: &str = include_str!("../../web/bridge/theme.js");
 const MPV_VIDEO_PLAYER_JS: &str = include_str!("../../web/bridge/mpvVideoPlayer.js");
 const MPV_AUDIO_PLAYER_JS: &str = include_str!("../../web/bridge/mpvAudioPlayer.js");
 const INPUT_PLUGIN_JS: &str = include_str!("../../web/bridge/inputPlugin.js");
@@ -36,6 +37,7 @@ pub fn build_init_script(settings: &Settings, app_origin: &str, user_agent: &str
     for part in [
         API_JS,
         HOST_KEYS_JS,
+        THEME_JS,
         MPV_VIDEO_PLAYER_JS,
         MPV_AUDIO_PLAYER_JS,
         INPUT_PLUGIN_JS,

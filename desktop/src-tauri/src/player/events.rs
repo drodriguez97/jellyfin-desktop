@@ -60,6 +60,7 @@ struct Tracker {
     window_visible: bool,
     video_playback_active: bool,
     last_position: f64,
+    last_position_emit: std::time::Instant,
 }
 
 impl Tracker {
@@ -76,6 +77,7 @@ impl Tracker {
             window_visible: false,
             video_playback_active: false,
             last_position: 0.0,
+            last_position_emit: std::time::Instant::now(),
         }
     }
 
@@ -299,10 +301,15 @@ fn handle_property(player: &Player, t: &mut Tracker, id: u64, data: PropertyData
         }
         PROP_PLAYBACK_TIME => {
             if let PropertyData::Double(pos) = data {
-                if (pos - t.last_position).abs() > 0.015 {
+                // mpv reports every frame; the web client only needs the ~4 Hz an
+                // HTML5 video element gives it. Seeks (big jumps) go through at once.
+                let jumped = (pos - t.last_position).abs() > 1.0;
+                let due = t.last_position_emit.elapsed() >= std::time::Duration::from_millis(200);
+                if (pos - t.last_position).abs() > 0.015 && (jumped || due) {
                     let ms = (pos * 1000.0).max(0.0) as u64;
                     emit(player, "positionUpdate", (ms,));
                     t.last_position = pos;
+                    t.last_position_emit = std::time::Instant::now();
                 }
             }
             false

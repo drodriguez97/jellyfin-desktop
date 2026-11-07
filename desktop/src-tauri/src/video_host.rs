@@ -77,6 +77,21 @@ pub fn create(parent: HWND) -> Result<HWND> {
     }
 }
 
+/// Asks DWM for the dark title bar so the frame matches the app. Windows 11
+/// also applies its rounded corners; nothing is drawn by us, so no cost.
+pub fn apply_dark_title_bar(hwnd: HWND) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_USE_IMMERSIVE_DARK_MODE};
+    let dark: i32 = 1;
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            &dark as *const i32 as *const _,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
 /// Resizes the child to the parent's current client area, keeping it at the bottom.
 pub fn resize_to_parent(hwnd: HWND, parent: HWND) {
     unsafe {

@@ -13,8 +13,10 @@ public struct RECT { public int Left, Top, Right, Bottom; }
 public static class Win32 {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 }
 "@
+[Win32]::SetProcessDPIAware() | Out-Null
 $proc = Get-Process -Name $ProcessName -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
 if (-not $proc) { throw "no window for $ProcessName" }
 [Win32]::SetForegroundWindow($proc.MainWindowHandle) | Out-Null

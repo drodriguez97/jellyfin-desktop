@@ -150,6 +150,18 @@ fn hwnd_of(window: &tauri::WebviewWindow) -> Result<HWND> {
     }
 }
 
+static WINDOW_REVEALED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Shows the main window exactly once (first page load, or the fallback timer).
+fn reveal_window(window: &tauri::WebviewWindow) {
+    if WINDOW_REVEALED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+    info!("window shown");
+}
+
 struct Boot {
     cli: Cli,
     profile: profiles::Profile,
@@ -192,6 +204,13 @@ fn setup(app: &mut tauri::App, boot: &Boot) -> Result<()> {
         .user_agent(&user_agent)
         .data_directory(boot.profile.data_dir().join("WebView2"))
         .initialization_script(init_script)
+        // Stay hidden until the first page has painted, so launch shows the
+        // connect screen directly instead of a black frame.
+        .on_page_load(|window, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                reveal_window(&window);
+            }
+        })
         .build()
         .context("create main window")?;
     info!("window + webview created in {:?}", t0.elapsed());
@@ -202,6 +221,7 @@ fn setup(app: &mut tauri::App, boot: &Boot) -> Result<()> {
 
     // Video host child + mpv.
     let parent = hwnd_of(&window)?;
+    video_host::apply_dark_title_bar(parent);
     let video = video_host::create(parent)?;
     let player = player::Player::new(handle.clone(), boot.settings.clone(), video, parent)?;
     *app.state::<player::commands::PlayerState>().write() = Some(player);
@@ -215,9 +235,14 @@ fn setup(app: &mut tauri::App, boot: &Boot) -> Result<()> {
         }
     });
 
-    window.show().context("show window")?;
     window::apply_settings(&handle);
-    info!("window shown at {:?}", t0.elapsed());
+    info!("setup done at {:?}; waiting for first page load to show", t0.elapsed());
+    // Safety net: never leave the user without a window if the page never loads.
+    let fallback = window.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        reveal_window(&fallback);
+    });
 
     *app.state::<media_keys::MediaKeysState>().lock() = media_keys::start(&handle, parent as isize);
     if let Err(e) = tray::install(&handle) {
