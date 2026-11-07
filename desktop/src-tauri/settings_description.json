@@ -419,14 +419,21 @@
       {
         "value": "cache",
         "display_name": "Cache Size",
-        "help": "Controls cache size in MB for video streaming. The default is 75 MB",
-        "default": 75,
+        "help": "How much video to read ahead into memory. Skips that land inside the cache resume instantly; skips beyond it reconnect to the server. The default is 150 MB.",
+        "default": 150,
         "possible_values": [
           [ 10, "Tiny (10 MB)" ],
-          [ 75, "Default (75 MB)" ],
-          [ 150, "Large (150 MB)", { "platforms_excluded": "oe_rpi" } ],
-          [ 500, "Very Large (500 MB)", { "platforms_excluded": "oe_rpi" } ]
+          [ 75, "Small (75 MB)" ],
+          [ 150, "Default (150 MB)" ],
+          [ 500, "Large (500 MB)" ],
+          [ 1000, "Very Large (1 GB)" ]
         ]
+      },
+      {
+        "value": "cache_on_disk",
+        "display_name": "Cache to Disk",
+        "help": "Keeps downloading the current file ahead of playback into a temporary file (up to 8 GB) instead of a small memory cache, so after the first minutes most of a movie is local and every skip is instant. Uses disk space while playing; the file is removed when playback ends. Takes effect on the next item.",
+        "default": false
       },
       {
         "value": "aspect",

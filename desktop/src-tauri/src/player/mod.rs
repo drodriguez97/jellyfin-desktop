@@ -448,8 +448,26 @@ impl Player {
         self.set("deinterlace", if deinterlace { "yes" } else { "no" });
 
         let cache_mb = s.i64(settings::SECTION_VIDEO, "cache");
-        self.set("demuxer-max-bytes", cache_mb * 1024 * 1024);
+        let cache_on_disk = s.bool(settings::SECTION_VIDEO, "cache_on_disk");
+        let cache_dir = s.conf_path().parent().map(|p| p.join("mpv-cache"));
         drop(s);
+        if cache_on_disk {
+            if let Some(dir) = cache_dir {
+                let _ = std::fs::create_dir_all(&dir);
+                if let Some(d) = dir.to_str() {
+                    self.set("cache-dir", d);
+                }
+            }
+            self.set("cache-on-disk", "yes");
+            // Disk-backed: cache (almost) the whole file ahead and keep a long tail
+            // behind so backwards skips stay local too.
+            self.set("demuxer-max-bytes", 8_i64 * 1024 * 1024 * 1024);
+            self.set("demuxer-max-back-bytes", 2_i64 * 1024 * 1024 * 1024);
+        } else {
+            self.set("cache-on-disk", "no");
+            self.set("demuxer-max-bytes", cache_mb.max(10) * 1024 * 1024);
+            self.set("demuxer-max-back-bytes", (cache_mb.max(10) / 2) * 1024 * 1024);
+        }
 
         let display_fps = crate::display::current_refresh_rate(self.window_hwnd());
         if display_fps > 0.0 {
