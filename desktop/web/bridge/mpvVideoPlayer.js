@@ -183,6 +183,7 @@
                     this.events.trigger(this, 'unpause');
                 }
 
+                this.loading.hide();
                 this.events.trigger(this, 'playing');
             };
 
@@ -551,9 +552,13 @@
                     player.paused.connect(this.onPause);
                     player.bufferedRangesUpdated.connect(this.onBufferedRangesUpdated);
 
-                    // Log all other signals
+                    // Show the loading indicator while mpv is seeking or waiting
+                    // for data, so a held frame doesn't look like a hang.
                     player.buffering.connect((percent) => {
-                        console.log(`[MPV Signal] buffering: ${percent}`);
+                        if (this._started) {
+                            this.loading.show();
+                            this.onWaiting();
+                        }
                     });
                     player.canceled.connect(() => console.log('[MPV Signal] canceled'));
                     player.stopped.connect(() => console.log('[MPV Signal] stopped'));
