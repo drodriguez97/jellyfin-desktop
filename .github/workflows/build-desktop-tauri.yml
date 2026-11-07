@@ -1,0 +1,62 @@
+name: build-desktop-tauri
+
+# Builds the Tauri/WebView2 shell under desktop/ (Windows x64) and uploads the
+# NSIS installer plus a portable zip.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - tauri-rewrite
+    paths:
+      - "desktop/**"
+      - ".github/workflows/build-desktop-tauri.yml"
+  pull_request:
+    paths:
+      - "desktop/**"
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Fetch libmpv and build the import library
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/fetch-mpv.ps1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build installer
+        shell: pwsh
+        working-directory: desktop/src-tauri
+        run: npx --yes @tauri-apps/cli@^2 build
+
+      - name: Make portable zip
+        shell: pwsh
+        run: |
+          $out = "desktop/src-tauri/target/release"
+          New-Item -ItemType Directory -Force portable | Out-Null
+          Copy-Item "$out/jellyfin-desktop.exe" portable/
+          Copy-Item "desktop/src-tauri/mpv/libmpv-2.dll" portable/
+          New-Item -ItemType File portable/portable | Out-Null
+          Compress-Archive -Path portable/* -DestinationPath JellyfinDesktop-windows-x64-portable.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-portable
+          path: JellyfinDesktop-windows-x64-portable.zip
