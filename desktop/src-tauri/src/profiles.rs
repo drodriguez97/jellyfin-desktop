@@ -178,17 +178,34 @@ pub fn set_default_profile(profile: &Profile) -> Result<()> {
 
 /// Picks the profile for this session: `--profile <name>`, else the default,
 /// else the first existing one, else a freshly created "Default".
-pub fn resolve_active_profile(requested: Option<&str>) -> Result<Profile> {
+/// Also returns a short description of how the profile was chosen, for the log
+/// (logging is not up yet at this point, so the caller logs it).
+pub fn resolve_active_profile(requested: Option<&str>) -> Result<(Profile, String)> {
     if let Some(name) = requested {
-        return profile_by_name(name).ok_or_else(|| anyhow!("Profile not found: {name}"));
+        let p = profile_by_name(name).ok_or_else(|| anyhow!("Profile not found: {name}"))?;
+        return Ok((p, format!("--profile {name}")));
     }
-    let profile = default_profile()
-        .or_else(|| profiles().into_iter().next())
-        .map(Ok)
-        .unwrap_or_else(|| create_profile("Default"))?;
+    let file = paths().data_root.join("profiles.json");
+    let (profile, how) = match default_profile() {
+        Some(p) => (p, format!("default from {}", file.display())),
+        None => {
+            let why = match fs::read_to_string(&file) {
+                Err(e) => format!("{} unreadable: {e}", file.display()),
+                Ok(c) => match serde_json::from_str::<ProfilesFile>(&c) {
+                    Err(e) => format!("{} unparsable: {e}", file.display()),
+                    Ok(f) if f.default_profile.is_empty() => format!("{} has no defaultProfile", file.display()),
+                    Ok(f) => format!("default {} has no directory", f.default_profile),
+                },
+            };
+            match profiles().into_iter().next() {
+                Some(p) => (p, format!("{why}; using the first existing profile")),
+                None => (create_profile("Default")?, format!("{why}; no profiles, created one")),
+            }
+        }
+    };
     set_default_profile(&profile)?;
     profile.ensure_directories()?;
-    Ok(profile)
+    Ok((profile, how))
 }
 
 /// 32 lowercase hex chars, matching QUuid::Id128 formatting.

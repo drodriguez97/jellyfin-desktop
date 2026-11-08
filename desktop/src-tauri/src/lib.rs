@@ -267,7 +267,7 @@ pub fn run() {
         }
     }
 
-    let profile = match profiles::resolve_active_profile(cli.profile.as_deref()) {
+    let (profile, profile_how) = match profiles::resolve_active_profile(cli.profile.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e:#}");
@@ -299,7 +299,12 @@ pub fn run() {
         profile.name(),
         log_path.display()
     );
-    info!("Config directory: {}", profile.data_dir().display());
+    info!("Config directory: {} ({profile_how})", profile.data_dir().display());
+    info!(
+        "command line: {:?}; cwd {:?}",
+        std::env::args().collect::<Vec<_>>(),
+        std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default()
+    );
     settings.log_summary();
 
     if let Some(fs) = cli.fullscreen {
