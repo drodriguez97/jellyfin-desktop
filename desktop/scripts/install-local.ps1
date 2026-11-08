@@ -7,6 +7,10 @@
 # -NoBuild      copy what is already built instead of running cargo first
 # -TargetDir    cargo target dir name under src-tauri (default: target)
 # -InstallDir   where the app is copied (default: %LOCALAPPDATA%\Programs\Jellyfin Desktop (Tauri))
+#
+# A running instance is never killed: Windows lets a running exe be renamed, so
+# the old file is moved aside, the new one takes its place and is picked up by
+# the next launch. The moved-aside file is cleaned up on a later run.
 param(
     [switch]$NoBuild,
     [string]$TargetDir = "target",
@@ -15,6 +19,7 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $tauri = Join-Path $root "src-tauri"
+Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] install-local: commit $(git -C $root rev-parse --short HEAD)"
 
 if (-not $NoBuild) {
     $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
@@ -31,20 +36,30 @@ $release = Join-Path $tauri "$TargetDir\release"
 $src = Join-Path $release "jellyfin-desktop.exe"
 if (-not (Test-Path $src)) { throw "no release build at $src" }
 
+New-Item -ItemType Directory -Force $InstallDir | Out-Null
 $exe = Join-Path $InstallDir "Jellyfin Desktop.exe"
-# Stop the installed copy if it is running so the exe can be replaced.
-Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe } | ForEach-Object {
-    Write-Host "stopping running instance (pid $($_.Id))"
-    Stop-Process -Id $_.Id -Force
-    $_.WaitForExit(5000) | Out-Null
+$old = Join-Path $InstallDir "Jellyfin Desktop.old.exe"
+
+# Remove a previously moved-aside exe if nothing runs it any more.
+if (Test-Path $old) {
+    try { Remove-Item $old -Force } catch { Write-Host "previous build still running; will remove it next time" }
 }
 
-New-Item -ItemType Directory -Force $InstallDir | Out-Null
-Copy-Item $src $exe -Force
+if ((Test-Path $exe) -and (Get-FileHash $exe).Hash -eq (Get-FileHash $src).Hash) {
+    Write-Host "installed exe is already this build"
+} else {
+    $running = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe }
+    if ($running) {
+        Write-Host "app is running (pid $($running.Id -join ', ')); staging the new build for the next launch"
+        Move-Item $exe $old -Force
+    }
+    Copy-Item $src $exe -Force
+}
+
 $dll = Join-Path $InstallDir "libmpv-2.dll"
 $dllSrc = Join-Path $tauri "mpv\libmpv-2.dll"
 if (-not (Test-Path $dll) -or (Get-Item $dllSrc).Length -ne (Get-Item $dll).Length) {
-    Copy-Item $dllSrc $dll -Force
+    try { Copy-Item $dllSrc $dll -Force } catch { Write-Host "libmpv-2.dll is in use; it is unchanged in this build anyway" }
 }
 
 # Desktop shortcut (the Desktop folder may be redirected to OneDrive).
@@ -52,12 +67,13 @@ $desktop = [Environment]::GetFolderPath("Desktop")
 $lnk = Join-Path $desktop "Jellyfin Desktop.lnk"
 $shell = New-Object -ComObject WScript.Shell
 $s = $shell.CreateShortcut($lnk)
-$s.TargetPath = $exe
-$s.WorkingDirectory = $InstallDir
-$s.IconLocation = "$exe,0"
-$s.Description = "Jellyfin Desktop"
-$s.Save()
+if ($s.TargetPath -ne $exe) {
+    $s.TargetPath = $exe
+    $s.WorkingDirectory = $InstallDir
+    $s.IconLocation = "$exe,0"
+    $s.Description = "Jellyfin Desktop"
+    $s.Save()
+}
 
-$ver = (Get-Item $exe).VersionInfo.FileVersion
-Write-Host "installed $exe ($ver, built $((Get-Item $src).LastWriteTime))"
+Write-Host "installed $exe (built $((Get-Item $src).LastWriteTime))"
 Write-Host "shortcut  $lnk"
