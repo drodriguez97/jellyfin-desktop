@@ -388,7 +388,6 @@ pub fn run() {
             system::system_open_external_url,
             system::system_check_server_connectivity,
             system::system_cancel_server_connectivity,
-            system::system_check_for_updates,
             system::system_get_capabilities_string,
             system::system_network_addresses,
             system::system_run_user_script,

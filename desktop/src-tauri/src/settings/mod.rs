@@ -311,8 +311,40 @@ impl Settings {
         };
         s.load_description(description_json)?;
         s.load_conf(false)?;
+        s.migrate_defaults();
         s.load_conf(true)?;
         Ok(s)
+    }
+
+    /// Applies defaults that changed since older builds. The config file stores
+    /// every value, defaults included, so a profile written by an older build
+    /// pins the old default forever. For each rule a stored value equal to the
+    /// old default counts as "never chosen" and goes back to the current
+    /// default; anything else is a deliberate choice and is kept. Runs once per
+    /// profile, tracked by `main.settingsRevision`.
+    fn migrate_defaults(&mut self) {
+        const REVISION: i64 = 1;
+        if self.i64(SECTION_MAIN, "settingsRevision") >= REVISION {
+            return;
+        }
+        let rules: [(&str, &str, Value); 3] = [
+            (SECTION_VIDEO, "hardwareDecoding", json!("copy")),
+            (SECTION_MAIN, "logLevel", json!("debug")),
+            (SECTION_VIDEO, "cache", json!(75)),
+        ];
+        for (section, key, old_default) in rules {
+            let Some(v) = self.sections.get_mut(section).and_then(|s| s.get_mut(key)) else { continue };
+            if v.value.as_ref() == Some(&old_default) && v.default != old_default {
+                info!("settings: {section}.{key} reset from old default {old_default} to new default {}", v.default);
+                v.value = None;
+            }
+        }
+        if let Some(v) = self.sections.get_mut(SECTION_MAIN).and_then(|s| s.get_mut("settingsRevision")) {
+            v.value = Some(json!(REVISION));
+        }
+        if let Err(e) = self.save_settings() {
+            warn!("could not save migrated settings: {e}");
+        }
     }
 
     fn load_description(&mut self, text: &str) -> Result<()> {

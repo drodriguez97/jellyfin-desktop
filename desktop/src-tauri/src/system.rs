@@ -227,27 +227,3 @@ pub fn system_fetch_page_for_csp_workaround(app: AppHandle, url: String) {
     let _ = app.emit("system:pageContentReady", (String::new(), url, false));
 }
 
-#[tauri::command]
-pub async fn system_check_for_updates(app: AppHandle, state: State<'_, SystemState>) -> Result<(), String> {
-    let enabled = state.settings.lock().bool(settings::SECTION_MAIN, "checkForUpdates");
-    if !enabled {
-        return Ok(());
-    }
-    let client = reqwest::Client::builder()
-        .user_agent(user_agent())
-        .timeout(Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|e| e.to_string())?;
-    let url = "https://github.com/jellyfin/jellyfin-desktop/releases/latest";
-    match client.get(url).send().await {
-        Ok(resp) if resp.status().is_redirection() => {
-            if let Some(loc) = resp.headers().get("location").and_then(|v| v.to_str().ok()) {
-                let _ = app.emit("system:updateInfoEmitted", (loc.to_string(),));
-            }
-        }
-        Ok(resp) => warn!("update check: unexpected status {}", resp.status()),
-        Err(e) => warn!("update check failed: {e}"),
-    }
-    Ok(())
-}

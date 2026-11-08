@@ -121,7 +121,6 @@
             openExternalUrl: ['system_open_external_url', ['url']],
             checkServerConnectivity: ['system_check_server_connectivity', ['url']],
             cancelServerConnectivity: ['system_cancel_server_connectivity', []],
-            checkForUpdates: ['system_check_for_updates', []],
             getCapabilitiesString: ['system_get_capabilities_string', []],
             networkAddresses: ['system_network_addresses', []],
             runUserScript: ['system_run_user_script', ['script']],
@@ -130,7 +129,7 @@
             fetchPageForCSPWorkaround: ['system_fetch_page_for_csp_workaround', ['url']]
         }, [
             'serverConnectivityResult', 'serverConnectivityAttemptFailed', 'pageContentReady',
-            'updateInfoEmitted', 'capabilitiesChanged', 'hostMessage', 'settingsMessage'
+            'capabilitiesChanged', 'hostMessage', 'settingsMessage'
         ]),
         settings: makeObject('settings', {
             setValue: ['settings_set_value', ['section', 'key', 'value']],

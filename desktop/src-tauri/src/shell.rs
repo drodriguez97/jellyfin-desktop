@@ -13,7 +13,6 @@ const LAZY_IMAGES_JS: &str = include_str!("../../web/bridge/lazyImages.js");
 const MPV_VIDEO_PLAYER_JS: &str = include_str!("../../web/bridge/mpvVideoPlayer.js");
 const MPV_AUDIO_PLAYER_JS: &str = include_str!("../../web/bridge/mpvAudioPlayer.js");
 const INPUT_PLUGIN_JS: &str = include_str!("../../web/bridge/inputPlugin.js");
-const UPDATE_PLUGIN_JS: &str = include_str!("../../web/bridge/updatePlugin.js");
 const CONNECTIVITY_HELPER_JS: &str = include_str!("../../web/bridge/connectivityHelper.js");
 const NATIVESHELL_JS: &str = include_str!("../../web/bridge/nativeshell.js");
 
@@ -43,7 +42,6 @@ pub fn build_init_script(settings: &Settings, app_origin: &str, user_agent: &str
         MPV_VIDEO_PLAYER_JS,
         MPV_AUDIO_PLAYER_JS,
         INPUT_PLUGIN_JS,
-        UPDATE_PLUGIN_JS,
         CONNECTIVITY_HELPER_JS,
         NATIVESHELL_JS,
     ] {

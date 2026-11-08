@@ -62,7 +62,6 @@
     "allow-system-open-external-url",
     "allow-system-check-server-connectivity",
     "allow-system-cancel-server-connectivity",
-    "allow-system-check-for-updates",
     "allow-system-get-capabilities-string",
     "allow-system-network-addresses",
     "allow-system-run-user-script",

@@ -68,6 +68,11 @@
         "hidden": true
       },
       {
+        "value": "settingsRevision",
+        "default": 0,
+        "hidden": true
+      },
+      {
         "value": "logLevel",
         "default": "info",
         "hidden": true,
@@ -121,12 +126,6 @@
         "value": "sdlEnabled",
         "default": true,
         "hidden": true
-      },
-      {
-        "value": "checkForUpdates",
-        "display_name": "Check For Updates",
-        "help": "Checks GitHub for a newer release on startup. Off until this shell has its own releases.",
-        "default": false
       },
       {
         "value": "enableInputRepeat",

@@ -61,7 +61,6 @@ pub const COMMANDS: &[&str] = &[
     "system_open_external_url",
     "system_check_server_connectivity",
     "system_cancel_server_connectivity",
-    "system_check_for_updates",
     "system_get_capabilities_string",
     "system_network_addresses",
     "system_run_user_script",
