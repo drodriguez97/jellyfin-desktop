@@ -69,7 +69,7 @@
       },
       {
         "value": "logLevel",
-        "default": "debug",
+        "default": "info",
         "hidden": true,
         "possible_values": [
           [ "debug", "debug" ],
@@ -300,8 +300,8 @@
       {
         "value": "hardwareDecoding",
         "display_name": "Hardware Decoding",
-        "help": "Sets the hardware decoding method. The default is \"copy\"\n\n- Enabled: full hardware acceleration. Removes MPV shader pipelines. Can cause issues more often.\n- Copy: uses hardware decoding but copies the video through MPV's shader pipelines.\n- Disabled: completely disable hardware decoding. Use this if video is glitchy.",
-        "default": "copy",
+        "help": "Sets the hardware decoding method. The default is \"enabled\".\n\n- Enabled: decodes on the GPU and renders the frames directly, with no copy through system memory. The fastest path; switch to Copy if video is glitchy with your driver.\n- Copy: decodes on the GPU but copies every frame back through mpv's shader pipeline. Safest, costs CPU and memory bandwidth.\n- Disabled: software decoding only.",
+        "default": "enabled",
         "possible_values": [
           [ "enabled", "Enabled", { "platforms_excluded": "osx" } ],
           [ "enabled", "Enabled (Modern)", { "platforms": "osx" } ],
