@@ -7,7 +7,6 @@ use super::{MediaType, Player};
 use anyhow::Result;
 use libmpv2::events::{Event, PropertyData};
 use libmpv2::Format;
-use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::Emitter;
 use tracing::{debug, info, warn};
@@ -25,128 +24,43 @@ const PROP_CACHE_STATE: u64 = 9;
 const HOOK_ON_LOAD: u64 = 1;
 const HOOK_ON_PRELOADED: u64 = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
-    Finished,
-    Canceled,
-    Error,
-    Paused,
-    Playing,
-    Buffering,
-}
+use super::state::{EndReason, State, StateUpdate, Tracker};
 
-impl State {
-    fn name(self) -> &'static str {
-        match self {
-            State::Finished => "finished",
-            State::Canceled => "canceled",
-            State::Error => "error",
-            State::Paused => "paused",
-            State::Playing => "playing",
-            State::Buffering => "buffering",
-        }
-    }
-}
-
-struct Tracker {
-    state: State,
-    paused: bool,
-    playback_active: bool,
-    in_playback: bool,
-    playback_canceled: bool,
-    playback_error: String,
-    buffering_percentage: i64,
-    last_buffering_percentage: i64,
-    window_visible: bool,
-    video_playback_active: bool,
-    last_position: f64,
-    last_position_emit: std::time::Instant,
-    buffering_since: std::time::Instant,
-}
-
-impl Tracker {
-    fn new() -> Self {
-        Self {
-            state: State::Finished,
-            paused: false,
-            playback_active: false,
-            in_playback: false,
-            playback_canceled: false,
-            playback_error: String::new(),
-            buffering_percentage: 100,
-            last_buffering_percentage: -1,
-            window_visible: false,
-            video_playback_active: false,
-            last_position: 0.0,
-            last_position_emit: std::time::Instant::now(),
-            buffering_since: std::time::Instant::now(),
-        }
-    }
-
-    fn update_playback_state(&mut self, player: &Player) {
-        let new_state = if self.in_playback {
-            if self.paused {
-                State::Paused
-            } else if self.playback_active {
-                State::Playing
-            } else {
-                if self.buffering_percentage == 100 {
-                    self.buffering_percentage = 0;
+/// Turns a state-machine result into the `player:*` events the web client expects.
+fn apply_update(player: &Player, tracker: &Tracker, update: StateUpdate) {
+    if let Some((new_state, old_state)) = update.transition {
+        info!("Entering state: {}", new_state.name());
+        match new_state {
+            State::Paused => emit(player, "paused", ()),
+            State::Playing => {
+                if old_state == State::Buffering {
+                    info!(
+                        "stall ended after {:?} ({})",
+                        tracker.buffering_since.elapsed(),
+                        player.stall_diagnostics()
+                    );
                 }
-                State::Buffering
+                emit(player, "playing", ())
             }
-        } else if !self.playback_error.is_empty() {
-            State::Error
-        } else if self.playback_canceled {
-            State::Canceled
-        } else {
-            State::Finished
-        };
-
-        if new_state != self.state {
-            info!("Entering state: {}", new_state.name());
-            match new_state {
-                State::Paused => emit(player, "paused", ()),
-                State::Playing => {
-                    if self.state == State::Buffering {
-                        info!(
-                            "stall ended after {:?} ({})",
-                            self.buffering_since.elapsed(),
-                            player.stall_diagnostics()
-                        );
-                    }
-                    emit(player, "playing", ())
-                }
-                State::Buffering => {
-                    self.last_buffering_percentage = -1;
-                    self.buffering_since = std::time::Instant::now();
-                    info!("stall: {}", player.stall_diagnostics());
-                }
-                State::Finished => {
-                    emit(player, "finished", ());
-                    emit(player, "stopped", ());
-                }
-                State::Canceled => {
-                    emit(player, "canceled", ());
-                    emit(player, "stopped", ());
-                }
-                State::Error => emit(player, "error", (self.playback_error.clone(),)),
+            State::Buffering => info!("stall: {}", player.stall_diagnostics()),
+            State::Finished => {
+                emit(player, "finished", ());
+                emit(player, "stopped", ());
             }
-            emit(player, "stateChanged", (new_state.name(), self.state.name()));
-            self.state = new_state;
+            State::Canceled => {
+                emit(player, "canceled", ());
+                emit(player, "stopped", ());
+            }
+            State::Error => emit(player, "error", (tracker.playback_error.clone(),)),
         }
-
-        if self.state == State::Buffering && self.last_buffering_percentage != self.buffering_percentage {
-            emit(player, "buffering", (self.buffering_percentage as f64,));
-        }
-        self.last_buffering_percentage = self.buffering_percentage;
-
-        let video_active = self.state == State::Playing && self.window_visible;
-        if video_active != self.video_playback_active {
-            self.video_playback_active = video_active;
-            emit(player, "videoPlaybackActive", (video_active,));
-            crate::power::set_display_required(video_active);
-        }
+        emit(player, "stateChanged", (new_state.name(), old_state.name()));
+    }
+    if let Some(pct) = update.buffering_percent {
+        emit(player, "buffering", (pct as f64,));
+    }
+    if let Some(active) = update.video_active {
+        emit(player, "videoPlaybackActive", (active,));
+        crate::power::set_display_required(active);
     }
 }
 
@@ -198,21 +112,13 @@ fn event_loop(player: Arc<Player>) {
                 info!("mpv shutdown");
                 break;
             }
-            Event::StartFile => tracker.in_playback = true,
+            Event::StartFile => tracker.start_file(),
             Event::EndFile(reason) => {
-                tracker.in_playback = false;
-                tracker.playback_canceled = false;
-                tracker.playback_error.clear();
-                match reason {
-                    libmpv2_sys::mpv_end_file_reason_MPV_END_FILE_REASON_ERROR => {
-                        // The error string is not exposed through this variant; use a generic message.
-                        tracker.playback_error = "playback error".into();
-                    }
-                    libmpv2_sys::mpv_end_file_reason_MPV_END_FILE_REASON_STOP => {
-                        tracker.playback_canceled = true;
-                    }
-                    _ => {}
-                }
+                tracker.end_file(match reason {
+                    libmpv2_sys::mpv_end_file_reason_MPV_END_FILE_REASON_ERROR => EndReason::Error,
+                    libmpv2_sys::mpv_end_file_reason_MPV_END_FILE_REASON_STOP => EndReason::Stop,
+                    _ => EndReason::Eof,
+                });
                 let switching = player
                     .stream_switch_imminent
                     .swap(false, std::sync::atomic::Ordering::Relaxed);
@@ -255,8 +161,8 @@ fn event_loop(player: Arc<Player>) {
         }
 
         if state_dirty {
-            // Drain everything that is already queued before deciding the state.
-            tracker.update_playback_state(&player);
+            let update = tracker.update(std::time::Instant::now());
+            apply_update(&player, &tracker, update);
         }
     }
 }
@@ -316,15 +222,8 @@ fn handle_property(player: &Player, t: &mut Tracker, id: u64, data: PropertyData
         }
         PROP_PLAYBACK_TIME => {
             if let PropertyData::Double(pos) = data {
-                // mpv reports every frame; the web client only needs the ~4 Hz an
-                // HTML5 video element gives it. Seeks (big jumps) go through at once.
-                let jumped = (pos - t.last_position).abs() > 1.0;
-                let due = t.last_position_emit.elapsed() >= std::time::Duration::from_millis(200);
-                if (pos - t.last_position).abs() > 0.015 && (jumped || due) {
-                    let ms = (pos * 1000.0).max(0.0) as u64;
+                if let Some(ms) = t.position_update(pos, std::time::Instant::now()) {
                     emit(player, "positionUpdate", (ms,));
-                    t.last_position = pos;
-                    t.last_position_emit = std::time::Instant::now();
                 }
             }
             false
@@ -350,25 +249,7 @@ fn handle_property(player: &Player, t: &mut Tracker, id: u64, data: PropertyData
         }
         PROP_CACHE_STATE => {
             if let PropertyData::Str(s) = data {
-                let ticks_per_second = 10_000_000.0; // Jellyfin's 100ns ticks
-                let parsed: Value = serde_json::from_str(s).unwrap_or(Value::Null);
-                let ranges: Vec<Value> = parsed
-                    .get("seekable-ranges")
-                    .and_then(Value::as_array)
-                    .map(|list| {
-                        list.iter()
-                            .map(|r| {
-                                let start = r.get("start").and_then(Value::as_f64).unwrap_or(0.0);
-                                let end = r.get("end").and_then(Value::as_f64).unwrap_or(0.0);
-                                json!({
-                                    "start": (start * ticks_per_second) as i64,
-                                    "end": (end * ticks_per_second) as i64
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                emit(player, "bufferedRangesUpdated", (ranges,));
+                emit(player, "bufferedRangesUpdated", (super::state::cache_ranges(s),));
             }
             false
         }

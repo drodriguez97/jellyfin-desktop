@@ -6,6 +6,10 @@ use crate::settings::{self, Settings};
 use base64::Engine;
 use serde_json::json;
 
+#[cfg(test)]
+#[path = "shell_tests.rs"]
+mod tests;
+
 const API_JS: &str = include_str!("../../web/bridge/api.js");
 const HOST_KEYS_JS: &str = include_str!("../../web/bridge/hostKeys.js");
 const THEME_JS: &str = include_str!("../../web/bridge/theme.js");

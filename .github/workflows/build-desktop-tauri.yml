@@ -1,7 +1,9 @@
 name: build-desktop-tauri
 
 # Builds the Tauri/WebView2 shell under desktop/ (Windows x64) and uploads the
-# NSIS installer plus a portable zip.
+# NSIS installer plus a portable zip. The test job runs the Rust unit tests
+# under cargo-llvm-cov and fails when the measured line coverage is below 90%
+# (see desktop/scripts/coverage.ps1 for what is measured).
 
 on:
   workflow_dispatch:
@@ -17,6 +19,39 @@ on:
       - "desktop/**"
 
 jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: coverage
+
+      - name: Fetch libmpv and build the import library
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/fetch-mpv.ps1
+
+      - name: Unit tests with coverage (fails below 90% lines)
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/src-tauri/target
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File desktop/scripts/coverage.ps1 -MinLines 90
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-lcov
+          path: desktop/dist/coverage/lcov.info
+
   build:
     runs-on: windows-latest
     steps:

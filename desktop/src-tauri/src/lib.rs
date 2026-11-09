@@ -1,7 +1,10 @@
 //! Jellyfin Desktop shell: WebView2 (jellyfin-web) over libmpv (D3D11).
 
 mod artwork;
+mod cli;
+mod connectivity;
 mod display;
+mod display_match;
 mod input;
 mod logging;
 mod media_keys;
@@ -12,6 +15,7 @@ mod settings;
 mod shell;
 mod system;
 mod tray;
+mod urls;
 mod video_host;
 mod window;
 
@@ -19,7 +23,6 @@ use anyhow::{anyhow, Context, Result};
 use parking_lot::Mutex;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use serde_json::json;
-use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tauri::webview::{Color, WebviewWindowBuilder};
@@ -29,118 +32,6 @@ use windows_sys::Win32::Foundation::HWND;
 
 const SETTINGS_DESCRIPTION: &str = include_str!("../settings_description.json");
 const APP_ORIGIN: &str = "http://tauri.localhost";
-
-#[derive(Default, Debug)]
-struct Cli {
-    profile: Option<String>,
-    config_dir: Option<PathBuf>,
-    log_level: Option<String>,
-    fullscreen: Option<bool>,
-    layout: Option<String>,
-    ignore_certificate_errors: bool,
-    remote_debugging_port: Option<String>,
-    list_profiles: bool,
-    create_profile: Option<String>,
-    delete_profile: Option<String>,
-    set_default_profile: Option<String>,
-    help: bool,
-}
-
-fn parse_cli() -> Cli {
-    let mut cli = Cli::default();
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut i = 0;
-    let value = |i: &mut usize, args: &[String]| -> Option<String> {
-        let a = &args[*i];
-        if let Some((_, v)) = a.split_once('=') {
-            return Some(v.to_string());
-        }
-        *i += 1;
-        args.get(*i).cloned()
-    };
-    while i < args.len() {
-        let a = args[i].clone();
-        let name = a.split('=').next().unwrap_or("").to_string();
-        match name.as_str() {
-            "--profile" => cli.profile = value(&mut i, &args),
-            "--config-dir" => cli.config_dir = value(&mut i, &args).map(PathBuf::from),
-            "--log-level" => cli.log_level = value(&mut i, &args),
-            "--remote-debugging-port" => cli.remote_debugging_port = value(&mut i, &args),
-            "--create-profile" => cli.create_profile = value(&mut i, &args),
-            "--delete-profile" => cli.delete_profile = value(&mut i, &args),
-            "--set-default-profile" => cli.set_default_profile = value(&mut i, &args),
-            "--list-profiles" => cli.list_profiles = true,
-            "--fullscreen" => cli.fullscreen = Some(true),
-            "--windowed" => cli.fullscreen = Some(false),
-            "--desktop" => cli.layout = Some("desktop".into()),
-            "--tv" => cli.layout = Some("tv".into()),
-            "--ignore-certificate-errors" => cli.ignore_certificate_errors = true,
-            "-h" | "--help" => cli.help = true,
-            _ => {}
-        }
-        i += 1;
-    }
-    cli
-}
-
-const HELP: &str = "Jellyfin Desktop
-
-Options:
-  --desktop | --tv              Start in desktop or TV layout
-  --windowed | --fullscreen     Start windowed or fullscreen
-  --ignore-certificate-errors   Ignore TLS certificate errors
-  --remote-debugging-port <n>   Expose WebView2 devtools on this port
-  --config-dir <path>           Override the config directory
-  --log-level <level>           debug, info, warn, error (default: info)
-
-Profile Options:
-  --profile <name>              Use a specific profile for this session
-  --list-profiles               List all profiles and exit
-  --create-profile <name>       Create a new profile and exit
-  --delete-profile <name>       Delete a profile and exit
-  --set-default-profile <name>  Set the default profile and exit
-";
-
-/// Handles the one-shot profile commands; returns true when the app should exit.
-fn handle_profile_commands(cli: &Cli) -> Result<bool> {
-    if cli.help {
-        print!("{HELP}");
-        return Ok(true);
-    }
-    if cli.list_profiles {
-        let default = profiles::default_profile();
-        let all = profiles::profiles();
-        if all.is_empty() {
-            println!("No profiles found.");
-        }
-        for p in all {
-            let marker = if default.as_ref() == Some(&p) { " *" } else { "" };
-            println!("{}{marker}", p.name());
-        }
-        return Ok(true);
-    }
-    if let Some(name) = &cli.create_profile {
-        if profiles::profile_by_name(name).is_some() {
-            return Err(anyhow!("Profile already exists: {name}"));
-        }
-        profiles::create_profile(name)?;
-        println!("Created profile: {name}");
-        return Ok(true);
-    }
-    if let Some(name) = &cli.delete_profile {
-        let p = profiles::profile_by_name(name).ok_or_else(|| anyhow!("Profile not found: {name}"))?;
-        profiles::delete_profile(&p)?;
-        println!("Deleted profile: {name}");
-        return Ok(true);
-    }
-    if let Some(name) = &cli.set_default_profile {
-        let p = profiles::profile_by_name(name).ok_or_else(|| anyhow!("Profile not found: {name}"))?;
-        profiles::set_default_profile(&p)?;
-        println!("Default profile set to: {name}");
-        return Ok(true);
-    }
-    Ok(false)
-}
 
 fn hwnd_of(window: &tauri::WebviewWindow) -> Result<HWND> {
     let handle = window.window_handle().context("window handle")?;
@@ -163,7 +54,7 @@ fn reveal_window(window: &tauri::WebviewWindow) {
 }
 
 struct Boot {
-    cli: Cli,
+    cli: cli::Cli,
     profile: profiles::Profile,
     settings: Arc<Mutex<settings::Settings>>,
 }
@@ -252,13 +143,13 @@ fn setup(app: &mut tauri::App, boot: &Boot) -> Result<()> {
 }
 
 pub fn run() {
-    let cli = parse_cli();
+    let cli = cli::parse_cli();
 
     if let Err(e) = profiles::init_paths(cli.config_dir.clone()) {
         eprintln!("{e:#}");
         std::process::exit(1);
     }
-    match handle_profile_commands(&cli) {
+    match cli::handle_profile_commands(&cli, profiles::paths()) {
         Ok(true) => return,
         Ok(false) => {}
         Err(e) => {
@@ -267,7 +158,7 @@ pub fn run() {
         }
     }
 
-    let (profile, profile_how) = match profiles::resolve_active_profile(cli.profile.as_deref()) {
+    let (profile, profile_how) = match profiles::resolve_active_profile(profiles::paths(), cli.profile.as_deref()) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("{e:#}");

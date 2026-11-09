@@ -3,6 +3,8 @@
 
 pub mod commands;
 pub mod events;
+pub mod logic;
+pub mod state;
 
 use crate::settings::{self, Settings};
 use anyhow::{anyhow, Result};
@@ -173,33 +175,12 @@ impl Player {
         }
         self.update_video_configuration();
 
-        let mut extra = String::new();
-        let start_ms = options.get("startMilliseconds").and_then(Value::as_i64).unwrap_or(0);
-        if start_ms != 0 {
-            extra.push_str(&format!("start=+{},", start_ms as f64 / 1000.0));
-        }
-        // Streams are selected in the on_preloaded hook.
-        extra.push_str("aid=no,sid=no,");
-        if metadata.get("type").and_then(Value::as_str) == Some("music") {
-            extra.push_str("vid=no,");
-        }
-        let autoplay = options.get("autoplay").and_then(Value::as_bool).unwrap_or(false);
-        extra.push_str(if autoplay { "pause=no," } else { "pause=yes," });
-        if let Some(ua) = metadata
-            .get("headers")
-            .and_then(|h| h.get("User-Agent"))
-            .and_then(Value::as_str)
-        {
-            if !ua.is_empty() {
-                extra.push_str(&format!("user-agent={ua},"));
-            }
-        }
-        extra.push_str("ad=,vd=");
+        let extra = logic::loadfile_options(options, metadata);
 
         self.command("loadfile", &[url, "append-play", "-1", &extra]);
 
         let jf_meta = metadata.get("metadata").cloned().unwrap_or(Value::Null);
-        let base_url = base_url_of(url);
+        let base_url = crate::urls::base_url_of(url);
         self.emit("onMetaData", (jf_meta.clone(), base_url.clone()));
         if jf_meta.is_object() {
             crate::artwork::request(self.app.clone(), jf_meta, url.to_string(), base_url);
@@ -269,20 +250,8 @@ impl Player {
     }
 
     fn find_streams_for_url(&self, url: &str) -> Vec<Value> {
-        let is_external = !url.is_empty();
-        self.get_json("track-list")
-            .as_array()
-            .map(|tracks| {
-                tracks
-                    .iter()
-                    .filter(|t| t.get("external").and_then(Value::as_bool).unwrap_or(false) == is_external)
-                    .filter(|t| {
-                        !is_external || t.get("external-filename").and_then(Value::as_str) == Some(url)
-                    })
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
+        let tracks = self.get_json("track-list").as_array().cloned().unwrap_or_default();
+        logic::tracks_for_url(&tracks, url).into_iter().cloned().collect()
     }
 
     /// Selects a track from either a Jellyfin relative index (integer, already
@@ -292,61 +261,18 @@ impl Player {
             MediaType::Subtitle => ("sub", "sid", "sub-add"),
             MediaType::Audio => ("audio", "aid", "audio-add"),
         };
-
-        if let Some(index) = selection.as_i64() {
-            if index < 0 {
-                self.set(id_prop, "no");
-            } else {
-                self.set(id_prop, index);
-            }
-            return;
-        }
-
-        let sel = match selection {
-            Value::String(s) => s.clone(),
-            Value::Null => String::new(),
-            other => other.to_string(),
-        };
-        if sel.is_empty() {
-            self.set(id_prop, "no");
-            return;
-        }
-
-        let mut stream_id = String::new();
-        let mut stream_name = String::new();
-        if let Some(rest) = sel.strip_prefix('#') {
-            match rest.find(',') {
-                None => stream_id = rest.to_string(),
-                Some(pos) => {
-                    stream_id = rest[..pos].to_string();
-                    stream_name = rest[pos + 1..].to_string();
+        match logic::parse_stream_selection(selection) {
+            logic::StreamSelection::Disable => self.set(id_prop, "no"),
+            logic::StreamSelection::Index(index) => self.set(id_prop, index),
+            logic::StreamSelection::External { id, name } => {
+                if !name.is_empty() && self.find_streams_for_url(&name).is_empty() {
+                    self.command(add_cmd, &[&name]);
                 }
+                let tracks = self.get_json("track-list").as_array().cloned().unwrap_or_default();
+                let chosen = logic::choose_track(&tracks, type_name, &id, &name, target == MediaType::Audio);
+                self.set(id_prop, chosen.as_str());
             }
         }
-
-        if !stream_name.is_empty() && self.find_streams_for_url(&stream_name).is_empty() {
-            self.command(add_cmd, &[&stream_name]);
-        }
-
-        let mut chosen = String::from("no");
-        if !stream_id.is_empty() {
-            chosen = stream_id.clone();
-        } else {
-            for s in self.find_streams_for_url(&stream_name) {
-                if s.get("type").and_then(Value::as_str) != Some(type_name) {
-                    continue;
-                }
-                if s.get("external-filename").and_then(Value::as_str) == Some(stream_name.as_str()) {
-                    chosen = s.get("id").map(json_to_string).unwrap_or_else(|| "no".into());
-                    break;
-                }
-            }
-        }
-        // Fall back to the first stream when the web client used a wrong id.
-        if (target == MediaType::Audio || !stream_id.is_empty()) && chosen == "no" {
-            chosen = "1".into();
-        }
-        self.set(id_prop, chosen.as_str());
     }
 
     // ---- configuration ---------------------------------------------------
@@ -382,32 +308,15 @@ impl Player {
         self.set("audio-normalize-downmix", if normalize { "yes" } else { "no" });
         self.set("audio-swresample-o", "surround_mix_level=1");
 
-        let mut passthrough: Vec<String> = Vec::new();
-        if device_type != "basic" {
-            let codecs: &[&str] = match device_type.as_str() {
-                "spdif" => &AUDIO_CODECS_SPDIF,
-                "hdmi" => &AUDIO_CODECS_ALL,
-                _ => &[],
-            };
-            for codec in codecs {
-                if s.bool(settings::SECTION_AUDIO, &format!("passthrough.{codec}")) {
-                    passthrough.push(codec.to_string());
-                }
-            }
-            if passthrough.iter().any(|c| c == "dts-hd") {
-                passthrough.retain(|c| c != "dts");
-            }
-        }
+        let passthrough =
+            logic::passthrough_codecs(&device_type, |codec| s.bool(settings::SECTION_AUDIO, &format!("passthrough.{codec}")));
         let passthrough_str = passthrough.join(",");
         self.set("audio-spdif", passthrough_str.as_str());
 
-        let mut layout = s.string(settings::SECTION_AUDIO, "channels");
-        if device_type == "spdif" {
-            layout = "2.0".into();
-        }
+        let layout = logic::channel_layout(&device_type, &s.string(settings::SECTION_AUDIO, "channels"));
         self.set("audio-channels", layout.as_str());
 
-        let do_ac3 = device_type == "spdif" && s.bool(settings::SECTION_AUDIO, "passthrough.ac3");
+        let do_ac3 = logic::ac3_transcoding(&device_type, s.bool(settings::SECTION_AUDIO, "passthrough.ac3"));
         let device = s.string(settings::SECTION_AUDIO, "device");
         drop(s);
 
@@ -436,11 +345,7 @@ impl Player {
         let sync_mode = s.string(settings::SECTION_VIDEO, "sync_mode");
         self.set("video-sync", sync_mode.as_str());
 
-        let (hwdec, image_format) = match s.string(settings::SECTION_VIDEO, "hardwareDecoding").as_str() {
-            "enabled" => ("auto-safe", "no"),
-            "copy" => ("auto-copy-safe", "no"),
-            _ => ("no", "no"),
-        };
+        let (hwdec, image_format) = logic::hwdec_options(&s.string(settings::SECTION_VIDEO, "hardwareDecoding"));
         self.set("hwdec", hwdec);
         self.set("hwdec-image-format", image_format);
 
@@ -455,24 +360,16 @@ impl Player {
         // behind so skips in both directions stay local. The budget is capped by
         // the free space on the drive, with a reserve left untouched; when there
         // is not enough room for a useful cache, fall back to the memory cache.
-        const GIB: i64 = 1024 * 1024 * 1024;
-        const DISK_CACHE_MAX: i64 = 8 * GIB;
-        const DISK_RESERVE: i64 = 4 * GIB;
-        const DISK_CACHE_MIN: i64 = GIB;
         let disk_budget = if cache_on_disk {
             cache_dir.as_ref().and_then(|dir| {
                 std::fs::create_dir_all(dir).ok()?;
                 let free = free_disk_space(dir)?;
-                let budget = (free - DISK_RESERVE).min(DISK_CACHE_MAX);
-                if budget >= DISK_CACHE_MIN {
-                    Some((dir.clone(), budget))
-                } else {
-                    warn!(
-                        "disk cache disabled: only {} MB free on {}",
-                        free / (1024 * 1024),
-                        dir.display()
-                    );
-                    None
+                match logic::disk_cache_budget(free) {
+                    Some(budget) => Some((dir.clone(), budget)),
+                    None => {
+                        warn!("disk cache disabled: only {} MB free on {}", free / (1024 * 1024), dir.display());
+                        None
+                    }
                 }
             })
         } else {
@@ -484,14 +381,16 @@ impl Player {
                     self.set("cache-dir", d);
                 }
                 self.set("cache-on-disk", "yes");
-                self.set("demuxer-max-bytes", budget);
-                self.set("demuxer-max-back-bytes", budget / 4);
+                let (max, back) = logic::disk_cache_bytes(budget);
+                self.set("demuxer-max-bytes", max);
+                self.set("demuxer-max-back-bytes", back);
                 info!("disk cache enabled, budget {} MB", budget / (1024 * 1024));
             }
             None => {
                 self.set("cache-on-disk", "no");
-                self.set("demuxer-max-bytes", cache_mb.max(10) * 1024 * 1024);
-                self.set("demuxer-max-back-bytes", (cache_mb.max(10) / 2) * 1024 * 1024);
+                let (max, back) = logic::memory_cache_bytes(cache_mb);
+                self.set("demuxer-max-bytes", max);
+                self.set("demuxer-max-back-bytes", back);
             }
         }
 
@@ -506,33 +405,16 @@ impl Player {
 
     pub fn update_video_aspect_settings(&self) {
         let mode = self.settings.lock().string(settings::SECTION_VIDEO, "aspect");
-        let mut unscaled = false;
-        let mut keep_aspect = true;
-        let mut force_aspect = "no".to_string();
-        let mut panscan = 0.0;
-        match mode.as_str() {
-            "custom" => return,
-            "zoom" => panscan = 1.0,
-            "force_4_3" => force_aspect = "4:3".into(),
-            "force_16_9" => force_aspect = "16:9".into(),
-            "force_16_9_if_4_3" => {
-                let aspect = self
-                    .get_json("video-dec-params")
-                    .get("aspect")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.0);
-                if (aspect - 4.0 / 3.0).abs() < 0.1 {
-                    force_aspect = "16:9".into();
-                }
-            }
-            "stretch" => keep_aspect = false,
-            "noscaling" => unscaled = true,
-            _ => {}
-        }
-        self.set("video-unscaled", unscaled);
-        self.set("video-aspect-override", force_aspect.as_str());
-        self.set("keepaspect", keep_aspect);
-        self.set("panscan", panscan);
+        let video_aspect = self
+            .get_json("video-dec-params")
+            .get("aspect")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let Some(a) = logic::aspect_settings(&mode, video_aspect) else { return };
+        self.set("video-unscaled", a.unscaled);
+        self.set("video-aspect-override", a.force_aspect.as_str());
+        self.set("keepaspect", a.keep_aspect);
+        self.set("panscan", a.panscan);
     }
 
     pub fn set_subtitle_configuration(&self) {
@@ -547,9 +429,8 @@ impl Player {
         if !override_mode.is_empty() {
             self.set("sub-ass-override", override_mode.as_str());
         }
-        let size = s.i64(sec, "size");
-        if size != -1 {
-            self.set("sub-scale", size as f64 / 32.0);
+        if let Some(scale) = logic::subtitle_scale(s.i64(sec, "size")) {
+            self.set("sub-scale", scale);
         }
         let font = s.string(sec, "font");
         if !font.is_empty() {
@@ -567,46 +448,28 @@ impl Player {
         if border_size != -1 {
             self.set("sub-border-size", border_size);
         }
-        let bg = s.string(sec, "background_color");
-        let bg_alpha = s.string(sec, "background_transparency");
-        if !bg.is_empty() && !bg_alpha.is_empty() {
-            let mut color = bg.clone();
-            color.insert_str(1, &bg_alpha);
+        if let Some(color) =
+            logic::subtitle_back_color(&s.string(sec, "background_color"), &s.string(sec, "background_transparency"))
+        {
             self.set("sub-back-color", color.as_str());
         }
-        let placement = s.string(sec, "placement");
-        let parts: Vec<&str> = placement.split(',').collect();
-        if parts.len() == 2 {
-            self.set("sub-align-x", parts[0]);
-            self.set("sub-pos", if parts[1] == "bottom" { 100_i64 } else { 10_i64 });
+        if let Some((align, pos)) = logic::subtitle_placement(&s.string(sec, "placement")) {
+            self.set("sub-align-x", align.as_str());
+            self.set("sub-pos", pos);
         }
     }
 
     pub fn set_other_configuration(&self) {
         let other = self.settings.lock().string(settings::SECTION_OTHER, "other_conf");
-        for line in other.lines().map(str::trim).filter(|l| !l.is_empty()) {
-            if let Some((k, v)) = line.split_once('=') {
-                let key = k.trim().trim_matches('"');
-                let value = v.trim().trim_matches('"');
-                if !key.is_empty() && !value.is_empty() {
-                    self.set(key, value);
-                }
-            }
+        for (key, value) in logic::parse_other_conf(&other) {
+            self.set(key.as_str(), value.as_str());
         }
     }
 
     pub fn set_audio_delay(&self, ms: i64) {
         self.audio_delay_ms.store(ms, Ordering::Relaxed);
         let display_fps = crate::display::current_refresh_rate(self.window_hwnd());
-        let key = if (display_fps - 24.0).abs() < 0.5 {
-            "audio_delay.24hz"
-        } else if (display_fps - 25.0).abs() < 0.5 {
-            "audio_delay.25hz"
-        } else if (display_fps - 50.0).abs() < 0.5 {
-            "audio_delay.50hz"
-        } else {
-            "audio_delay.normal"
-        };
+        let key = logic::audio_delay_key(display_fps);
         let fixed = self.settings.lock().f64(settings::SECTION_VIDEO, key);
         self.set("audio-delay", (fixed + ms as f64) / 1000.0);
     }
@@ -649,26 +512,7 @@ impl Player {
 
     pub fn update_audio_device_list(&self) {
         let user_device = self.settings.lock().string(settings::SECTION_AUDIO, "device");
-        let mut found = false;
-        let mut devices = HashSet::new();
-        let mut options = Vec::new();
-        if let Some(list) = self.audio_device_list().as_array() {
-            for d in list {
-                let name = d.get("name").and_then(Value::as_str).unwrap_or("").to_string();
-                let desc = d.get("description").and_then(Value::as_str).unwrap_or("").to_string();
-                if name == user_device {
-                    found = true;
-                }
-                devices.insert(name.clone());
-                options.push(serde_json::json!({ "value": name, "title": desc }));
-            }
-        }
-        if !found {
-            options.push(serde_json::json!({
-                "value": user_device,
-                "title": format!("[Disconnected device: {user_device}]")
-            }));
-        }
+        let (options, devices, _found) = logic::audio_device_options(&self.audio_device_list(), &user_device);
         let updates = self
             .settings
             .lock()
@@ -693,13 +537,10 @@ impl Player {
     }
 
     pub fn update_audio_device(&self) {
-        let mut device = self.settings.lock().string(settings::SECTION_AUDIO, "device");
-        if device.is_empty() {
-            device = "auto".into();
-        }
-        if device != "auto" && !self.playback.lock().audio_devices.contains(&device) {
-            warn!("Not using audio device {device} because it's not present.");
-            device = "auto".into();
+        let configured = self.settings.lock().string(settings::SECTION_AUDIO, "device");
+        let device = logic::effective_audio_device(&configured, &self.playback.lock().audio_devices);
+        if device == "auto" && configured != "auto" && !configured.is_empty() {
+            warn!("Not using audio device {configured} because it's not present.");
         }
         self.set("audio-device", device.as_str());
     }
@@ -752,23 +593,6 @@ impl Player {
             p("cache-speed"),
         )
     }
-}
-
-fn json_to_string(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
-/// scheme://host[:port] of a URL, without path or query.
-fn base_url_of(url: &str) -> String {
-    let (scheme, rest) = match url.split_once("://") {
-        Some(x) => x,
-        None => return String::new(),
-    };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    format!("{scheme}://{host}")
 }
 
 /// Free bytes available to the current user on the volume holding `path`.

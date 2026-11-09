@@ -11,6 +11,10 @@ use tracing_subscriber::prelude::*;
 
 const MAX_LOGS: usize = 10;
 
+#[cfg(test)]
+#[path = "logging_tests.rs"]
+mod tests;
+
 /// Replaces the 32 characters following known token markers with `x`.
 pub fn censor(msg: &str) -> String {
     const MARKERS: [&str; 6] = [

@@ -7,6 +7,9 @@
 
 pub mod commands;
 
+#[cfg(test)]
+mod tests;
+
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
