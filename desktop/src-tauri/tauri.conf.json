@@ -15,8 +15,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
     "resources": {
       "mpv/libmpv-2.dll": "libmpv-2.dll"
     },
@@ -24,6 +29,10 @@
       "webviewInstallMode": {
         "type": "embedBootstrapper",
         "silent": true
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerIcon": "icons/icon.ico"
       }
     }
   }
