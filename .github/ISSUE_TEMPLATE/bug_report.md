@@ -14,10 +14,8 @@ Four considerations:
      - Notably, there have been instances of custom CSS breaking TV mode.
      - You can disable custom CSS under Display in the user settings.
  - Please provide logs. You can drag the log file into the issue to attach it.
-     - Windows: `%LOCALAPPDATA%\Jellyfin Desktop\logs`
-     - Linux: `~/.local/share/jellyfin-desktop/logs/`
-     - Linux (Flatpak): `~/.var/app/org.jellyfin.JellyfinDesktop/data/jellyfin-desktop/logs/`
-     - macOS: `~/Library/Logs/Jellyfin Desktop/`
+     - `%LOCALAPPDATA%\Jellyfin Desktop\profiles\<profile-id>\logs\jellyfin-desktop.log`
+ - For playback problems, also note the file's codec and resolution and whether it direct-plays or transcodes.
 
 **Describe the bug**
 A clear and concise description of what the bug is.
@@ -36,9 +34,10 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Version [e.g. 22]
- - Installation Method [e.g. windows installer]
+ - Windows version: [e.g. Windows 11 24H2]
+ - GPU: [e.g. Intel UHD 620, RTX 3060]
+ - App version / commit: [from the first line of the log]
+ - Installation method: [installer / portable zip / built from source]
 
 **Additional context**
 Add any other context about the problem here.
